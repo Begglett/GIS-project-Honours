@@ -1,0 +1,100 @@
+# Caracal Roadkill Map
+
+(*This code is aimed at providing a map of the samples collected by the Urban Caracal Project and showing the selected samples that were most likely killed by roadkill.*)
+
+## Libraries
+We start by pulling the libraries that we will need for our data tidying and GIS work.
+
+```{r libraries}
+library("tidyverse")
+library("dplyr")
+library("sf")
+library("rosm")
+library("ggspatial")
+```
+## Reading data
+
+The working directory is then set to where the data file is stored (*this you will need to change if you are reproducing this code*). The data is then read in with white space trimmed to make sure random spaces made when entering the data do not interfere with data analyses.
+
+```{r reading data}
+setwd("C:/Users/Adam Begg/Desktop/Honors 2022/CARACAL/Data")
+cat <- readxl::read_xlsx("UCP_isotope_sample_catalogue.xlsx",trim_ws = TRUE)
+```
+## Tidying the data
+
+The data is filtered into the columns we need (first seven) and only the entries that are from the cape town (ct) or greater cape town (gct) areas and have coordinate data are included. There are multiple entries per individual which [*unique()*] collates into one entry. The tidied data is then converted into a data frame. 
+
+```{r tidying data}
+gct <- c("gct","ct")
+
+catGPS <- cat[,1:7] %>%
+  filter(area %in% gct & 
+           !is.na(long)) %>%
+  unique() 
+
+catsf <- st_as_sf(catGPS, coords = c( "lat","long"), crs = 4326)
+
+                  
+```
+
+## Basic Plot
+A basic plot of the points on an **Open Street Maps** base layer is made to check for any points that do not make sense geographically.
+
+```{r make a basic plot to check}
+ggplot() + 
+  annotation_map_tile(type = "osm", progress = "none") + 
+  geom_sf(data=catsf,aes(col = `species`))
+```
+
+## Roads
+A road layer was downloaded as a shape file from (*https://mapcruzin.com/free-south-africa-arcgis-maps-shapefiles.htm*). The shape file can be found in the folder **caracal roads**. The coordinate reference system was checked and found to be the same for the road shape file and the point data. The road vector object was then cropped to the extent of the point data. 
+
+```{r read in road layer & check crs & crop to extent of points}
+road <- st_read("C:/Users/Adam Begg/Desktop/Honors 2022/GIS/caracal roads/roads.shp")
+
+st_crs(road)
+st_crs(catGPS)
+#####  Crop the roads to extent of cats
+road <- st_crop(road, catsf)
+```
+
+## Roadkill
+The location points were then filtered to those that were within 20 meters of a road from the road map. The *st_is_within_distance* function returned a list of row numbers and so to filter for these rows a new column of row numbers up to 298 was created.
+
+```{r roadkill}
+class(catsf)
+catsf_road<-st_is_within_distance(road,catsf, 20) %>%
+  unlist() %>%
+  unique()            
+
+rows <- 1:298
+catsf <- cbind(catsf,rows)
+catsf_road2 <- catsf[catsf$rows %in% catsf_road,]
+```
+
+## Plot to check filter
+The filtered data was plotted with species as a legend colour to check that the filter for points only on or close to roads was successful
+
+```{r ggplot roads}
+ggplot() + 
+  annotation_map_tile(type = "osm", progress = "none") + 
+  geom_sf(data = road, colour = "blue") +
+  geom_sf(data=catsf_road2,aes(col = `species`))
+
+```
+
+## Leaflet map
+An interactive leaflet map of only the data points that are of caracals and are within 20 meters of a road and thus assumed to be samples collected from roadkill.
+
+```{r leaflet}
+library(leaflet)
+library(htmltools)
+leaflet() %>%
+  # Add default OpenStreetMap map tiles
+  addTiles(group = "Default") %>%  
+  # Add our points
+  addCircleMarkers(data = catsf_road2[catsf_road2$species =="caracal",],
+                   radius = 3, 
+                   color = "orange") 
+
+```
